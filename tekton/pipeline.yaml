@@ -1,12 +1,6 @@
-#
-# This pipeline needs the following tasks from Tekton Hub
-#   - git-clone
-#   - flake8
-#
----
 apiVersion: tekton.dev/v1beta1
 kind: Pipeline
-metadata:  
+metadata:
   name: cd-pipeline
 spec:
   workspaces:
@@ -15,45 +9,62 @@ spec:
     - name: repo-url
     - name: branch
       default: main
+    - name: build-image
   tasks:
-    - name: lint
-      workspaces:
-        - name: source
-          workspace: pipeline-workspace
-      taskRef:
-        name: flake8
-      params:
-      - name: image
-        value: "python:3.9-slim"
-      - name: args
-        value: ["--count","--max-complexity=10","--max-line-length=127","--statistics"]
-      runAfter:
-        - clone
-
     - name: clone
-      workspaces:
-        - name: output
-          workspace: pipeline-workspace          
       taskRef:
         name: git-clone
+      workspaces:
+        - name: output
+          workspace: pipeline-workspace
       params:
-      - name: url
-        value: $(params.repo-url)
-      - name: revision
-        value: $(params.branch)
+        - name: url
+          value: $(params.repo-url)
+        - name: revision
+          value: $(params.branch)
+
+    - name: lint
+      taskRef:
+        name: flake8
+      workspaces:
+        - name: source
+          workspace: pipeline-workspace
+      params:
+        - name: image
+          value: python:3.9-slim
+        - name: args
+          value:
+            - "--count"
+            - "--max-complexity=10"
+            - "--max-line-length=127"
+            - "--statistics"
       runAfter:
-        - init
+        - clone
 
     - name: tests
+      taskRef:
+        name: nose
+      workspaces:
+        - name: source
+          workspace: pipeline-workspace
+      params:
+        - name: database_uri
+          value: sqlite:///test.db
+        - name: args
+          value: "-v --with-spec --spec-color"
+      runAfter:
+        - clone
+
+    - name: build
       workspaces:
         - name: source
           workspace: pipeline-workspace
       taskRef:
-        name: nose
+        name: buildah
+        kind: ClusterTask
       params:
-      - name: database_uri
-        value: "sqlite:///test.db"
-      - name: args
-        value: "-v --with-spec --spec-color"
+      - name: IMAGE
+        value: "$(params.build-image)"
       runAfter:
-        - clone
+        - tests
+        - lint
